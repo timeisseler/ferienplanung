@@ -91,12 +91,38 @@ class LoadProfileProcessor:
             source_info = ""
             
             if category == 'public_holiday':
-                # Try to find same holiday in source
+                # Try to find same holiday in source with position matching
+                matching_holidays = []
                 for src_date, chunk, src_desc in categorized_source['public_holiday']:
                     if src_desc == description:
-                        source_chunk = chunk
+                        matching_holidays.append((src_date, chunk, src_desc))
+                
+                if matching_holidays:
+                    # Sort by date to maintain order
+                    matching_holidays.sort(key=lambda x: x[0])
+                    
+                    # For most public holidays, there's only one day, but handle multi-day cases
+                    if len(matching_holidays) == 1:
+                        src_date, source_chunk, src_desc = matching_holidays[0]
                         source_info = f"Holiday: {description} from {src_date}"
-                        break
+                    else:
+                        # Multi-day public holiday - find position within period
+                        holiday_start = current_date
+                        check_date = current_date
+                        while check_date >= date(target_year, 1, 1):
+                            prev_date = pd.Timestamp(check_date) - pd.Timedelta(days=1)
+                            prev_date = prev_date.date()
+                            prev_cat, prev_desc = self.holiday_fetcher.categorize_date(prev_date, target_year)
+                            if prev_cat != 'public_holiday' or prev_desc != description:
+                                break
+                            holiday_start = prev_date
+                            check_date = prev_date
+                        
+                        day_position = (current_date - holiday_start).days
+                        idx = day_position % len(matching_holidays)
+                        src_date, source_chunk, src_desc = matching_holidays[idx]
+                        source_info = f"Holiday: {description} from {src_date} (day {day_position + 1})"
+                
                 # Fallback to any holiday
                 if source_chunk is None and categorized_source['public_holiday']:
                     src_date, chunk, src_desc = categorized_source['public_holiday'][0]
@@ -104,12 +130,43 @@ class LoadProfileProcessor:
                     source_info = f"Holiday: {src_desc} from {src_date}"
             
             elif category == 'school_holiday':
-                # Match by holiday type (e.g., summer holidays)
+                # Match by holiday type AND position within holiday period
+                # First, collect all matching holidays by type
+                matching_holidays = []
                 for src_date, chunk, src_desc in categorized_source['school_holiday']:
                     if src_desc.lower() in description.lower() or description.lower() in src_desc.lower():
-                        source_chunk = chunk
-                        source_info = f"School holiday: {src_desc} from {src_date}"
-                        break
+                        matching_holidays.append((src_date, chunk, src_desc))
+                
+                if matching_holidays:
+                    # Sort by date to maintain order within holiday period
+                    matching_holidays.sort(key=lambda x: x[0])
+                    
+                    # Calculate position within target holiday period
+                    # Find start of target holiday period by checking backwards
+                    holiday_start = current_date
+                    check_date = current_date
+                    while check_date >= date(target_year, 1, 1):
+                        prev_date = pd.Timestamp(check_date) - pd.Timedelta(days=1)
+                        prev_date = prev_date.date()
+                        prev_cat, prev_desc = self.holiday_fetcher.categorize_date(prev_date, target_year)
+                        if prev_cat != 'school_holiday' or prev_desc != description:
+                            break
+                        holiday_start = prev_date
+                        check_date = prev_date
+                    
+                    # Calculate day position within holiday (0-based)
+                    day_position = (current_date - holiday_start).days
+                    
+                    # Use modulo to cycle through available source days if needed
+                    if day_position < len(matching_holidays):
+                        src_date, source_chunk, src_desc = matching_holidays[day_position]
+                    else:
+                        # Cycle through available days
+                        idx = day_position % len(matching_holidays)
+                        src_date, source_chunk, src_desc = matching_holidays[idx]
+                    
+                    source_info = f"School holiday: {src_desc} from {src_date} (day {day_position + 1})"
+                
                 # Fallback to any school holiday
                 if source_chunk is None and categorized_source['school_holiday']:
                     src_date, chunk, src_desc = categorized_source['school_holiday'][0]
@@ -117,14 +174,26 @@ class LoadProfileProcessor:
                     source_info = f"School holiday: {src_desc} from {src_date}"
             
             elif category == 'weekend':
-                # Match by week number
+                # Match by week number AND weekday (Saturday=5, Sunday=6)
                 week_num = current_date.isocalendar()[1]
+                target_weekday = current_date.weekday()  # 5=Saturday, 6=Sunday
+                
+                # First try: exact week and weekday match
                 for src_date, chunk, src_desc in categorized_source['weekend']:
-                    if f"KW{week_num}" in src_desc:
+                    if f"KW{week_num}" in src_desc and src_date.weekday() == target_weekday:
                         source_chunk = chunk
                         source_info = f"Weekend {src_desc} from {src_date}"
                         break
-                # Fallback to any weekend
+                
+                # Second try: same weekday from any week
+                if source_chunk is None:
+                    for src_date, chunk, src_desc in categorized_source['weekend']:
+                        if src_date.weekday() == target_weekday:
+                            source_chunk = chunk
+                            source_info = f"Weekend {src_desc} from {src_date}"
+                            break
+                
+                # Fallback to any weekend (maintain original fallback behavior)
                 if source_chunk is None and categorized_source['weekend']:
                     # Use modulo to cycle through available weekends
                     idx = week_num % len(categorized_source['weekend'])
