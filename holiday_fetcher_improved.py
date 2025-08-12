@@ -158,12 +158,59 @@ class HolidayFetcher:
                     end = self._parse_date(end_str)
                     
                     if start and end:
-                        holidays.append((start, end, name))
+                        # Normalize holiday name to include state and year for consistency
+                        normalized_name = self._normalize_holiday_name(name, year)
+                        holidays.append((start, end, normalized_name))
                         
         except Exception as e:
             print(f"API error: {e}")
             
         return holidays
+    
+    def _normalize_holiday_name(self, name: str, year: int) -> str:
+        """Normalize holiday name to ensure consistent format"""
+        # Convert to lowercase for consistency
+        name_lower = name.lower()
+        
+        # Map state codes to full names
+        state_names = {
+            'BW': 'baden-württemberg',
+            'BY': 'bayern',
+            'BE': 'berlin',
+            'BB': 'brandenburg',
+            'HB': 'bremen',
+            'HH': 'hamburg',
+            'HE': 'hessen',
+            'MV': 'mecklenburg-vorpommern',
+            'NI': 'niedersachsen',
+            'NW': 'nordrhein-westfalen',
+            'RP': 'rheinland-pfalz',
+            'SL': 'saarland',
+            'SN': 'sachsen',
+            'ST': 'sachsen-anhalt',
+            'SH': 'schleswig-holstein',
+            'TH': 'thüringen'
+        }
+        
+        state_name = state_names.get(self.federal_state, self.federal_state.lower())
+        
+        # Check if the name already contains the state and year
+        has_state = state_name in name_lower
+        has_year = str(year) in name
+        
+        # Build normalized name
+        if not has_state and not has_year:
+            # Name has neither state nor year (e.g., "Winterferien")
+            return f"{name_lower} {state_name} {year}"
+        elif not has_state:
+            # Has year but no state
+            return f"{name_lower.replace(str(year), '')} {state_name} {year}".strip()
+        elif not has_year:
+            # Has state but no year
+            return f"{name_lower} {year}"
+        else:
+            # Already has both
+            return name_lower
     
     def _parse_date(self, date_str: str) -> date:
         """Parse date string with multiple format attempts"""
@@ -191,30 +238,36 @@ class HolidayFetcher:
         
         # Typical German school holiday periods (approximate)
         # Winter holidays (around February)
-        holidays.append((date(year, 2, 10), date(year, 2, 24), "Winterferien"))
+        name = self._normalize_holiday_name("Winterferien", year)
+        holidays.append((date(year, 2, 10), date(year, 2, 24), name))
         
         # Easter holidays (around Easter)
         easter = self._calculate_easter(year)
-        holidays.append((easter - pd.Timedelta(days=7), easter + pd.Timedelta(days=7), "Osterferien"))
+        name = self._normalize_holiday_name("Osterferien", year)
+        holidays.append((easter - pd.Timedelta(days=7), easter + pd.Timedelta(days=7), name))
         
         # Whitsun holidays (around Pentecost)
-        holidays.append((easter + pd.Timedelta(days=49), easter + pd.Timedelta(days=56), "Pfingstferien"))
+        name = self._normalize_holiday_name("Pfingstferien", year)
+        holidays.append((easter + pd.Timedelta(days=49), easter + pd.Timedelta(days=56), name))
         
         # Summer holidays (July-August, varies by state)
+        name = self._normalize_holiday_name("Sommerferien", year)
         if self.federal_state in ['BY', 'BW']:
             # Southern states typically later
-            holidays.append((date(year, 7, 25), date(year, 9, 7), "Sommerferien"))
+            holidays.append((date(year, 7, 25), date(year, 9, 7), name))
         else:
             # Northern states typically earlier
-            holidays.append((date(year, 7, 1), date(year, 8, 15), "Sommerferien"))
+            holidays.append((date(year, 7, 1), date(year, 8, 15), name))
         
         # Autumn holidays (October)
-        holidays.append((date(year, 10, 14), date(year, 10, 25), "Herbstferien"))
+        name = self._normalize_holiday_name("Herbstferien", year)
+        holidays.append((date(year, 10, 14), date(year, 10, 25), name))
         
         # Christmas holidays
-        holidays.append((date(year, 12, 23), date(year, 12, 31), "Weihnachtsferien"))
+        name = self._normalize_holiday_name("Weihnachtsferien", year)
+        holidays.append((date(year, 12, 23), date(year, 12, 31), name))
         if year < 2100:  # Avoid going into next year for last year
-            holidays.append((date(year + 1, 1, 1), date(year + 1, 1, 6), "Weihnachtsferien"))
+            holidays.append((date(year + 1, 1, 1), date(year + 1, 1, 6), name))
         
         return holidays
     

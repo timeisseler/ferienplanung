@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+import re
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Tuple, Optional
 from config import INTERVALS_PER_DAY, INTERVAL_MINUTES
@@ -93,8 +94,12 @@ class LoadProfileProcessor:
             if category == 'public_holiday':
                 # Try to find same holiday in source with position matching
                 matching_holidays = []
+                # For public holidays, match by name (they don't have years typically)
                 for src_date, chunk, src_desc in categorized_source['public_holiday']:
-                    if src_desc == description:
+                    # Remove any potential year information for better matching
+                    target_name = re.sub(r'\s*\d{4}\s*', '', description).strip().lower()
+                    source_name = re.sub(r'\s*\d{4}\s*', '', src_desc).strip().lower()
+                    if source_name == target_name:
                         matching_holidays.append((src_date, chunk, src_desc))
                 
                 if matching_holidays:
@@ -123,18 +128,25 @@ class LoadProfileProcessor:
                         src_date, source_chunk, src_desc = matching_holidays[idx]
                         source_info = f"Holiday: {description} from {src_date} (day {day_position + 1})"
                 
-                # Fallback to any holiday
+                # Fallback to any holiday - cycle through available days
                 if source_chunk is None and categorized_source['public_holiday']:
-                    src_date, chunk, src_desc = categorized_source['public_holiday'][0]
+                    # Use day of year to select which holiday chunk to use
+                    day_of_year = current_date.timetuple().tm_yday
+                    idx = day_of_year % len(categorized_source['public_holiday'])
+                    src_date, chunk, src_desc = categorized_source['public_holiday'][idx]
                     source_chunk = chunk
-                    source_info = f"Holiday: {src_desc} from {src_date}"
+                    source_info = f"Holiday: {src_desc} from {src_date} (fallback)"
             
             elif category == 'school_holiday':
                 # Match by holiday type AND position within holiday period
                 # First, collect all matching holidays by type
                 matching_holidays = []
+                # Remove year from descriptions for better matching
+                target_type = re.sub(r'\s*\d{4}\s*', '', description).strip().lower()
+                
                 for src_date, chunk, src_desc in categorized_source['school_holiday']:
-                    if src_desc.lower() in description.lower() or description.lower() in src_desc.lower():
+                    source_type = re.sub(r'\s*\d{4}\s*', '', src_desc).strip().lower()
+                    if source_type == target_type:
                         matching_holidays.append((src_date, chunk, src_desc))
                 
                 if matching_holidays:
@@ -167,11 +179,14 @@ class LoadProfileProcessor:
                     
                     source_info = f"School holiday: {src_desc} from {src_date} (day {day_position + 1})"
                 
-                # Fallback to any school holiday
+                # Fallback to any school holiday - cycle through available days
                 if source_chunk is None and categorized_source['school_holiday']:
-                    src_date, chunk, src_desc = categorized_source['school_holiday'][0]
+                    # Use day of year to select which school holiday chunk to use
+                    day_of_year = current_date.timetuple().tm_yday
+                    idx = day_of_year % len(categorized_source['school_holiday'])
+                    src_date, chunk, src_desc = categorized_source['school_holiday'][idx]
                     source_chunk = chunk
-                    source_info = f"School holiday: {src_desc} from {src_date}"
+                    source_info = f"School holiday: {src_desc} from {src_date} (fallback)"
             
             elif category == 'weekend':
                 # Match by week number AND weekday (Saturday=5, Sunday=6)
